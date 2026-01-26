@@ -1,162 +1,114 @@
-// Exam page – shown when user clicks "Enter >>" on a contest
-// Layout: header (title, timer, sun/moon toggle), subject tabs, question area + sidebar, bottom buttons
-// Theme: SQORA colors; sun/moon toggles light/dark mode
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
 import './Exam.css'
 
-// Mock contest title by code; in real app, fetch from API
-const contestTitleByCode = {
-  'JEE-M1': 'JEE Main 2025 (Online) 8th April Evening Shift',
-  'NEET-P1': 'NEET 2025 Previous Year Paper 1',
-  'JEE-A1': 'JEE Advanced Mock 1',
-  'NEET-M1': 'NEET Mock 1 – Physics, Chemistry, Biology',
-  'JEE-M2': 'JEE Main Mock 2 – PCM',
-  'NEET-M2': 'NEET Mock 2 – Full syllabus',
-}
-
-const SUBJECTS = ['Chemistry', 'Physics', 'Mathematics']
-const QUESTIONS_PER_SUBJECT = 25
-
-// Sample MCQ
-const SAMPLE_QUESTION = {
-  id: 1,
-  type: 'MCQ Single Answer',
-  text: 'The atomic number of the element from the following with lowest 1st ionisation enthalpy is:',
-  options: [
-    { key: 'A', value: '32' },
-    { key: 'B', value: '35' },
-    { key: 'C', value: '19' },
-    { key: 'D', value: '87' },
-  ],
+// Configuration for dynamic subjects and question counts
+const EXAM_CONFIGS = {
+  JEE: { 
+    subjects: ['Physics', 'Chemistry', 'Mathematics'], 
+    qPerSubject: 25, 
+    totalQ: 75 
+  },
+  NEET: { 
+    subjects: ['Physics', 'Chemistry', 'Botany', 'Zoology'], 
+    qPerSubject: 45, 
+    totalQ: 180 
+  }
 }
 
 function Exam() {
   const { code } = useParams()
-  const { state } = useLocation()
   const navigate = useNavigate()
-  const title = state?.name || contestTitleByCode[code] || `${code} – Contest`
+  
+  // 1. DYNAMIC CONFIG: Detects NEET vs JEE from URL code
+  const isNEET = code?.toUpperCase().startsWith('NEET');
+  const config = isNEET ? EXAM_CONFIGS.NEET : EXAM_CONFIGS.JEE;
 
-  const [darkMode, setDarkMode] = useState(() => {
-    try {
-      return localStorage.getItem('sqora-exam-theme') !== 'light'
-    } catch {
-      return true
-    }
-  })
-  const [subject, setSubject] = useState(0)
-  const [qIndex, setQIndex] = useState(0)
-  const [selected, setSelected] = useState(null)
-  const [status, setStatus] = useState({})
-  const [timeLeft, setTimeLeft] = useState(2 * 60 * 60 + 56 * 60 + 25)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  // --- STATE ---
+  const [darkMode, setDarkMode] = useState(true) // Default to SQORA Dark
+  const [currentGlobalQ, setCurrentGlobalQ] = useState(1) // Continuous count: 1 to 180
+  const [userAnswers, setUserAnswers] = useState({}) // Stores { qNumber: "A" }
+  const [status, setStatus] = useState({}) // Stores { qNumber: "seen" | "attempted" }
+  const [timeLeft, setTimeLeft] = useState(3 * 60 * 60) // 3 Hours
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const [paused, setPaused] = useState(false)
 
+  // 2. AUTO-SWITCH LOGIC: Determines which subject tab should be active based on currentGlobalQ
+  const { activeSubjectIdx, relativeNum } = useMemo(() => {
+    const sIdx = Math.floor((currentGlobalQ - 1) / config.qPerSubject);
+    const rNum = ((currentGlobalQ - 1) % config.qPerSubject) + 1;
+    return { activeSubjectIdx: sIdx, relativeNum: rNum };
+  }, [currentGlobalQ, config]);
+
+  // --- AUTH GUARD (Mock) --- 
+  // useEffect(() => { 
+  //   const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true'; 
+  //   if (!isLoggedIn) { 
+  //     // If not logged in, redirect to login page 
+  //     navigate('/login'); 
+  //   } 
+  // }, [navigate]);
+
+  // --- TIMER LOGIC ---
   useEffect(() => {
-    if (paused) return
-    const t = setInterval(() => {
-      setTimeLeft((prev) => Math.max(0, prev - 1))
-    }, 1000)
+    if (paused || timeLeft <= 0) return
+    const t = setInterval(() => setTimeLeft((prev) => Math.max(0, prev - 1)), 1000)
     return () => clearInterval(t)
-  }, [paused])
+  }, [paused, timeLeft])
 
-  useEffect(() => {
-    localStorage.setItem('sqora-exam-theme', darkMode ? 'dark' : 'light')
-  }, [darkMode])
-
-  const toggleTheme = () => setDarkMode((d) => !d)
+  // --- HELPER FUNCTIONS ---
   const formatTime = (s) => {
-    const h = Math.floor(s / 3600)
-    const m = Math.floor((s % 3600) / 60)
-    const n = s % 60
-    return [h, m, n].map((x) => String(x).padStart(2, '0')).join(':')
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const n = s % 60;
+    return [h, m, n].map((x) => String(x).padStart(2, '0')).join(':');
   }
 
-  const qKey = `${subject}-${qIndex}`
-  const markSeen = (s, q) => {
-    const k = `${s}-${q}`
-    setStatus((prev) => ({ ...prev, [k]: prev[k] === 'attempted' || prev[k] === 'attempted-marked' ? prev[k] : 'seen' }))
+  const handleOptionSelect = (key) => {
+    setUserAnswers(prev => ({ ...prev, [currentGlobalQ]: key }));
+    setStatus(prev => ({ ...prev, [currentGlobalQ]: 'attempted' }));
   }
-  const markAttempted = () => {
-    setStatus((prev) => ({ ...prev, [qKey]: 'attempted' }))
-  }
-  const goTo = (s, q) => {
-    setSubject(s)
-    setQIndex(q)
-    markSeen(s, q)
-    setSidebarOpen(false)
+
+  const navigateQuestion = (direction) => {
+    if (direction === 'next' && currentGlobalQ < config.totalQ) {
+      setCurrentGlobalQ(prev => prev + 1);
+    } else if (direction === 'prev' && currentGlobalQ > 1) {
+      setCurrentGlobalQ(prev => prev - 1);
+    }
+    // Mark next/prev question as seen immediately
+    const nextQ = direction === 'next' ? currentGlobalQ + 1 : currentGlobalQ - 1;
+    if (nextQ >= 1 && nextQ <= config.totalQ) {
+        setStatus(prev => ({ ...prev, [nextQ]: prev[nextQ] === 'attempted' ? 'attempted' : 'seen' }));
+    }
   }
 
   return (
     <div className={`exam-page ${darkMode ? 'exam-dark' : 'exam-light'}`}>
+      {/* 3. HEADER: Increased size for readability */}
       <header className="exam-header">
-        <div className="exam-header-center">
-          <h1 className="exam-title">{title}</h1>
+        <div className="exam-header-left">
+          <button className="pause-btn" onClick={() => setPaused(!paused)}>
+            {paused ? '▶' : '⏸'} 
+          </button>
           <div className="exam-timer">{formatTime(timeLeft)}</div>
+          <h1 className="exam-title-text">{code}</h1>
         </div>
+
         <div className="exam-header-actions">
-          <button
-            type="button"
-            className="exam-btn-pause-resume"
-            onClick={() => setPaused((p) => !p)}
-            aria-label={paused ? 'Resume' : 'Pause'}
-          >
-            {paused ? 'Resume' : 'Pause'}
+          <button className="theme-toggle" onClick={() => setDarkMode(!darkMode)}>
+            {darkMode ? '☀️' : '🌙'}
           </button>
-          <button type="button" className="exam-header-btn" aria-label="Fullscreen">
-            <span className="exam-header-icon">⛶</span>
-          </button>
-          <button type="button" className="exam-header-btn" aria-label="Instructions">
-            <span className="exam-header-icon">💡</span>
-          </button>
-          <button
-            type="button"
-            className="exam-header-btn exam-theme-toggle"
-            onClick={toggleTheme}
-            aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={darkMode ? 'Light mode' : 'Dark mode'}
-          >
-            {darkMode ? (
-              <svg className="exam-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="5" />
-                <line x1="12" y1="1" x2="12" y2="3" />
-                <line x1="12" y1="21" x2="12" y2="23" />
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                <line x1="1" y1="12" x2="3" y2="12" />
-                <line x1="21" y1="12" x2="23" y2="12" />
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-              </svg>
-            ) : (
-              <svg className="exam-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </svg>
-            )}
-          </button>
-          <button type="button" className="exam-header-btn" aria-label="Settings">
-            <span className="exam-header-icon">⚙</span>
-          </button>
-          <button
-            type="button"
-            className="exam-header-btn exam-hamburger"
-            onClick={() => setSidebarOpen((o) => !o)}
-            aria-label="Toggle question list"
-            aria-expanded={sidebarOpen}
-          >
-            <span className="exam-hamburger-lines" />
-          </button>
+          <button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
         </div>
       </header>
 
-      {/* Subject tabs */}
+      {/* 4. SUBJECT TABS: Auto-highlights based on global number */}
       <nav className="exam-tabs">
-        {SUBJECTS.map((s, i) => (
+        {config.subjects.map((s, i) => (
           <button
             key={s}
-            type="button"
-            className={`exam-tab ${i === subject ? 'exam-tab-active' : ''}`}
-            onClick={() => goTo(i, 0)}
+            className={`exam-tab ${i === activeSubjectIdx ? 'exam-tab-active' : ''}`}
+            onClick={() => setCurrentGlobalQ((i * config.qPerSubject) + 1)}
           >
             {s}
           </button>
@@ -164,81 +116,52 @@ function Exam() {
       </nav>
 
       <div className="exam-body">
-        {sidebarOpen && (
-          <button
-            type="button"
-            className="exam-drawer-backdrop"
-            aria-label="Close"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
         <main className="exam-main">
-          <div className="exam-q-meta">
-            <span className="exam-q-time">03:35 | +4 -1</span>
+          {/* Question Meta Info */}
+          <div className="exam-q-header">
+            <div className="q-badge">Question {currentGlobalQ}</div>
+            <div className="q-subject-tag">{config.subjects[activeSubjectIdx]}</div>
+            <div className="q-scoring">+4  -1</div>
           </div>
-          <div className="exam-q-head">
-            <span className="exam-q-num">{qIndex + 1}</span>
-            <span className="exam-q-type">{SAMPLE_QUESTION.type}</span>
-          </div>
-          <p className="exam-q-text">{SAMPLE_QUESTION.text}</p>
-          <div className="exam-options">
-            {SAMPLE_QUESTION.options.map((opt) => (
-              <label key={opt.key} className={`exam-option ${selected === opt.key ? 'exam-option-selected' : ''}`}>
-                <input
-                  type="radio"
-                  name="mcq"
-                  value={opt.key}
-                  checked={selected === opt.key}
-                  onChange={() => {
-                    setSelected(opt.key)
-                    markAttempted()
-                  }}
-                />
-                <span className="exam-option-letter">{opt.key}</span>
-                <span className="exam-option-value">{opt.value}</span>
-              </label>
-            ))}
+          
+          <div className="exam-q-content">
+            <p className="exam-q-text">
+                The atomic number of the element from the following with lowest 1st ionisation enthalpy is:
+            </p>
+            
+            {/* 5. OPTIONS: Fixed ghosting by using global number as key */}
+            <div className="exam-options-grid">
+              {['A', 'B', 'C', 'D'].map((opt) => (
+                <div 
+                  key={opt} 
+                  className={`option-card ${userAnswers[currentGlobalQ] === opt ? 'selected' : ''}`}
+                  onClick={() => handleOptionSelect(opt)}
+                >
+                  <span className="option-letter">{opt}</span>
+                  <span className="option-label">Option value text for {opt}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </main>
 
-        {/* Side panel: opens via hamburger (top right). Question numbers, attempt status, Submit. Only this scrolls. */}
-        <aside className={`exam-sidebar exam-drawer ${sidebarOpen ? 'exam-drawer-open' : ''}`}>
-          <div className="exam-drawer-header">
-            <span>Questions</span>
-            <button type="button" className="exam-drawer-close" onClick={() => setSidebarOpen(false)} aria-label="Close">
-              ×
-            </button>
-          </div>
-          <div className="exam-drawer-scroll">
-            <div className="exam-legend">
-              <span className="exam-legend-item attempted">Attempted</span>
-              <span className="exam-legend-item attempted-marked">Attempted & Marked</span>
-              <span className="exam-legend-item marked">Marked</span>
-              <span className="exam-legend-item seen">Seen</span>
-              <span className="exam-legend-item not-seen">Not Seen</span>
-            </div>
-            {SUBJECTS.map((sub, si) => (
-              <div key={sub} className="exam-subject-block">
-                <div className="exam-subject-stats">
-                  <span>0 Attempted</span>
-                  <span>0 Attempted & Marked</span>
-                  <span>0 Marked</span>
-                  <span>{si === 0 && qIndex === 0 ? 1 : 0} Seen</span>
-                  <span>{QUESTIONS_PER_SUBJECT - (si === 0 && qIndex === 0 ? 1 : 0)} Not Seen</span>
-                </div>
-                <div className="exam-q-grid">
-                  {Array.from({ length: QUESTIONS_PER_SUBJECT }, (_, i) => {
-                    const key = `${si}-${i}`
-                    const st = status[key] || (si === subject && i === qIndex ? 'seen' : 'not-seen')
-                    const active = si === subject && i === qIndex
+        {/* 6. SIDEBAR: Continuous numbering with Subject Headings */}
+        <aside className={`exam-sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
+          <div className="sidebar-scroll-area">
+            {config.subjects.map((subName, si) => (
+              <div key={subName} className="sidebar-section">
+                <h4 className="sidebar-section-title">{subName}</h4>
+                <div className="q-grid">
+                  {Array.from({ length: config.qPerSubject }).map((_, i) => {
+                    const qNum = (si * config.qPerSubject) + i + 1;
+                    const qStatus = status[qNum] || 'not-seen';
                     return (
                       <button
-                        key={key}
-                        type="button"
-                        className={`exam-q-dot ${st} ${active ? 'exam-q-dot-active' : ''}`}
-                        onClick={() => goTo(si, i)}
+                        key={qNum}
+                        className={`q-circle ${qStatus} ${currentGlobalQ === qNum ? 'active-q' : ''}`}
+                        onClick={() => setCurrentGlobalQ(qNum)}
                       >
-                        {i + 1}
+                        {qNum}
                       </button>
                     )
                   })}
@@ -246,33 +169,23 @@ function Exam() {
               </div>
             ))}
           </div>
-          <div className="exam-drawer-footer">
-            <button type="button" className="exam-btn exam-btn-submit" onClick={() => navigate('/contests')}>
-              Submit Test
-            </button>
+          <div className="sidebar-footer">
+            <button className="submit-btn" onClick={() => navigate('/contests')}>Submit Test</button>
           </div>
         </aside>
       </div>
 
-      {/* Bottom: Clear, Previous, Next only */}
       <footer className="exam-footer">
-        <button type="button" className="exam-btn exam-btn-clear" onClick={() => setSelected(null)}>
-          Clear Response
-        </button>
-        <button
-          type="button"
-          className="exam-btn exam-btn-prev"
-          onClick={() => goTo(subject, Math.max(0, qIndex - 1))}
-        >
-          Previous
-        </button>
-        <button
-          type="button"
-          className="exam-btn exam-btn-next"
-          onClick={() => goTo(subject, Math.min(QUESTIONS_PER_SUBJECT - 1, qIndex + 1))}
-        >
-          Next
-        </button>
+        <button className="clear-btn" onClick={() => {
+          const newAns = {...userAnswers};
+          delete newAns[currentGlobalQ];
+          setUserAnswers(newAns);
+        }}>Clear Response</button>
+        
+        <div className="footer-nav-group">
+          <button className="nav-btn" onClick={() => navigateQuestion('prev')}>Previous</button>
+          <button className="nav-btn next-btn" onClick={() => navigateQuestion('next')}>Next</button>
+        </div>
       </footer>
     </div>
   )
