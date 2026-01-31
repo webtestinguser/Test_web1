@@ -6,7 +6,7 @@ import * as THREE from 'three'
 export function MentorModel({ isSpeaking, ...props }) {
   const group = useRef()
   // Path to your model
-  const { nodes, materials, animations } = useGLTF('/animated-female-teacher/source/Teacher Female Narration 01 (1).glb')
+  const { nodes, materials, animations } = useGLTF('/animated-female-teacher/source/teacher_model.glb')
   const { actions } = useAnimations(animations, group)
 
   // --- ADJUST LIP SYNC HERE ---
